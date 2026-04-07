@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root { --primary: #0085ba; --bg: #f4f7fa; --card: #fff; --text: #1e293b; --muted: #64748b; --border: #e2e8f0; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Inter', -apple-system, sans-serif; font-size: 13px; color: var(--text); background: var(--bg); padding: 14px; }
+        .header { font-size: 14px; font-weight: 700; padding-bottom: 10px; margin-bottom: 14px; border-bottom: 2px solid var(--primary); }
+        .course-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); transition: box-shadow 0.2s, transform 0.2s; }
+        .course-card:hover { box-shadow: 0 4px 10px rgba(0,0,0,0.08); transform: translateY(-1px); }
+        .course-title { font-weight: 600; line-height: 1.4; margin-bottom: 9px; display: block; }
+        .progress-bar { background: #e2e8f0; border-radius: 999px; height: 6px; overflow: hidden; margin-bottom: 8px; }
+        .progress-fill { height: 100%; border-radius: 999px; background: var(--primary); transition: width 0.9s ease; }
+        .course-meta { display: flex; justify-content: space-between; align-items: center; }
+        .badge { font-size: 10px; font-weight: 600; padding: 3px 8px; border-radius: 4px; text-transform: uppercase; background: #f1f5f9; color: #475569; }
+        .badge.completado { background: #ecfdf5; color: #059669; }
+        .badge.en-curso { background: #eff6ff; color: #2563eb; }
+        .badge.no-iniciado { background: #fef2f2; color: #dc2626; }
+        .pct { font-size: 12px; font-weight: 700; color: var(--primary); }
+        .state-msg { text-align: center; padding: 20px 14px; background: var(--card); border: 1px dashed var(--border); border-radius: 8px; color: var(--muted); line-height: 1.6; font-size: 12px; }
+        .spinner { width: 22px; height: 22px; border: 3px solid #e2e8f0; border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 10px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        #log { font-size: 10px; color: #94a3b8; margin-top: 12px; line-height: 1.8; word-break: break-all; }
+        #log .ok { color: #10b981; } #log .fail { color: #ef4444; } #log .wait { color: #f59e0b; }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <h2 style="color:var(--primary);margin-bottom:10px;">Cursos LearnDash</h2>
+        <div class="state-msg"><div class="spinner"></div>Iniciando Widget CRM...</div>
+        <div id="log"></div>
+    </div>
+
+    <!--
+        SDK BUNDLEADO LOCALMENTE — evita CORS/404 de CDN externas en instancias Zoho EU.
+        El SDK se incluye inline más abajo. NO cargar desde live.zwidgets.com ni js.zwidgets.com.
+    -->
+    <script src="ZohoEmbededAppSDK.min.js"></script>
+
+    <script type="text/javascript">
+        function log(msg, type) {
+            var el = document.getElementById('log');
+            if (el) el.innerHTML += '<div class="' + (type||'') + '">' + msg + '</div>';
+        }
+
+        // Verificar que el SDK cargó correctamente
+        if (typeof ZOHO === 'undefined') {
+            document.getElementById('app').innerHTML = 
+                '<div class="state-msg" style="border-color:#ef4444;color:#dc2626;">❌ Error: SDK de Zoho no cargó.<br>Contacta al administrador.</div>';
+        } else {
+            ZOHO.embeddedApp.on("PageLoad", function(data) {
+                log('✓ PageLoad detectado', 'ok');
+                if (data && data.Entity && data.EntityId) {
+                    log('Módulo: ' + data.Entity + ' | ID: ' + data.EntityId, 'wait');
+                    obtenerEmail(data.Entity, data.EntityId);
+                } else {
+                    log('❌ No se recibió EntityId en PageLoad', 'fail');
+                    document.getElementById('app').innerHTML = 
+                        '<div class="state-msg">⚠️ Sin contexto de registro.<br>Abre este widget desde un registro de CRM.</div>';
+                }
+            });
+
+            ZOHO.embeddedApp.init().then(function() {
+                log('✓ SDK inicializado correctamente', 'ok');
+            }).catch(function(err) {
+                log('❌ Error init SDK: ' + JSON.stringify(err), 'fail');
+            });
+        }
+
+        function obtenerEmail(module, recordId) {
+            log('Consultando registro en CRM...', 'wait');
+            ZOHO.CRM.API.getRecord({
+                Entity: module,
+                RecordID: recordId
+            }).then(function(response) {
+                if (response && response.data && response.data.length > 0) {
+                    var record = response.data[0];
+                    var email = record.Email;
+                    if (email) {
+                        log('✓ Email: ' + email, 'ok');
+                        solicitarCursos(email);
+                    } else {
+                        log('❌ Registro sin campo Email', 'fail');
+                        document.getElementById('app').innerHTML = 
+                            '<div class="state-msg">Este registro no tiene email.<br>Añade un email para ver sus cursos.</div>';
+                    }
+                } else {
+                    log('❌ Sin datos del registro', 'fail');
+                }
+            }).catch(function(err) {
+                log('❌ Error API CRM: ' + JSON.stringify(err), 'fail');
+            });
+        }
+
+        function solicitarCursos(email) {
+            log('Solicitando cursos a WordPress...', 'wait');
+            var urlBase = 'https://campus.thebigschool.com/wp-json/zoho/v1/progreso/';
+            var wpKey  = 'TBS_ZOHO_8f2a9c3d5e1b7f4A2d8B0';
+
+            // ZOHO.CRM.HTTP.post es un proxy server-side:
+            // la petición la hace el servidor de Zoho, no el navegador → sin CORS.
+            ZOHO.CRM.HTTP.post({
+                url: urlBase,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: email, key: wpKey })
+            }).then(function(res) {
+                log('✓ Respuesta recibida del proxy', 'ok');
+                try {
+                    var data = res;
+                    if (typeof data === 'string') data = JSON.parse(data);
+                    // El proxy de Zoho puede anidar la respuesta en .body
+                    if (data && typeof data.body !== 'undefined') {
+                        data = (typeof data.body === 'string') ? JSON.parse(data.body) : data.body;
+                    }
+                    renderCourses(data, email);
+                } catch(e) {
+                    log('❌ Error parseando respuesta: ' + e.message, 'fail');
+                    log('Raw: ' + JSON.stringify(res).substring(0, 300), 'fail');
+                }
+            }).catch(function(err) {
+                log('❌ Error proxy HTTP: ' + JSON.stringify(err), 'fail');
+                document.getElementById('app').innerHTML = 
+                    '<div class="state-msg">❌ No se pudo conectar con el servidor de cursos.<br>' +
+                    'Verifica que <strong>campus.thebigschool.com</strong> esté en whiteListedDomains del manifest.</div>';
+            });
+        }
+
+        function renderCourses(data, email) {
+            var el = document.getElementById('app');
+            if (!data || !data.cursos || data.cursos.length === 0) {
+                el.innerHTML = '<div class="state-msg">📭 Sin cursos para:<br><strong>' + email + '</strong></div>';
+                return;
+            }
+            var html = '<div class="header">🎓 ' + (data.nombre || email) + '</div>';
+            for (var i = 0; i < data.cursos.length; i++) {
+                var c = data.cursos[i];
+                var p = parseInt(c.progreso) || 0;
+                var b = getBadge(c.estado);
+                html += '<div class="course-card">' +
+                    '<span class="course-title">' + (c.titulo || 'Curso') + '</span>' +
+                    '<div class="progress-bar"><div class="progress-fill" style="width:' + p + '%"></div></div>' +
+                    '<div class="course-meta">' +
+                        '<span class="badge ' + b + '">' + (c.estado || '?') + '</span>' +
+                        '<span class="pct">' + p + '%</span>' +
+                    '</div></div>';
+            }
+            el.innerHTML = html;
+        }
+
+        function getBadge(e) {
+            if (!e) return '';
+            var s = e.toLowerCase();
+            if (s.indexOf('completado') !== -1) return 'completado';
+            if (s.indexOf('no iniciado') !== -1) return 'no-iniciado';
+            return 'en-curso';
+        }
+    </script>
+</body>
+</html>
