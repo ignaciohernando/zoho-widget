@@ -33,7 +33,7 @@
         <div id="log"></div>
     </div>
 
-    <script src="https://live.zwidgets.com/js-sdk/1.3/ZohoEmbededAppSDK.min.js"></script>
+    <script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
 
     <script>
         function log(msg, type) {
@@ -41,43 +41,31 @@
             if (el) el.innerHTML += '<div class="'+(type||'')+'">'+msg+'</div>';
         }
 
-        function startApp() {
-            log('SDK listo, registrando PageLoad...', 'ok');
-
-            ZOHO.embeddedApp.on("PageLoad", function(data) {
-                log('PageLoad recibido: ' + JSON.stringify(data), 'ok');
-                if (data && data.Entity && data.EntityId) {
-                    obtenerEmail(data.Entity, data.EntityId);
-                } else {
-                    log('Sin EntityId en PageLoad', 'fail');
-                    document.getElementById('app').innerHTML =
-                        '<div class="state-msg">Sin contexto de registro.<br>Abre este widget desde un registro.</div><div id="log"></div>';
-                }
-            });
-
-            ZOHO.embeddedApp.init().then(function() {
-                log('embeddedApp.init() OK', 'ok');
-            }).catch(function(e) {
-                log('init() error: ' + JSON.stringify(e), 'fail');
-            });
-        }
-
-        // Esperar a que el SDK cargue, con reintento por si tarda
-        var sdkAttempts = 0;
-        function waitForSDK() {
-            if (typeof ZOHO !== 'undefined' && ZOHO.embeddedApp) {
-                startApp();
-            } else if (sdkAttempts < 20) {
-                sdkAttempts++;
-                setTimeout(waitForSDK, 300);
+        // =============================================
+        // PASO 1: Inicialización Síncrona
+        // =============================================
+        log('Registrando PageLoad...', 'wait');
+        
+        ZOHO.embeddedApp.on("PageLoad", function(data) {
+            log('PageLoad recibido: ' + JSON.stringify(data), 'ok');
+            if (data && data.Entity && data.EntityId) {
+                obtenerEmail(data.Entity, data.EntityId);
             } else {
-                log('SDK no disponible tras 6s', 'fail');
+                log('Sin EntityId en PageLoad', 'fail');
                 document.getElementById('app').innerHTML =
-                    '<div class="state-msg" style="border-color:#ef4444;color:#dc2626;">Error: SDK de Zoho no cargó.<br>Revisa la consola del navegador.</div>';
+                    '<div class="state-msg">Sin contexto de registro.<br>Abre este widget desde un registro.</div><div id="log"></div>';
             }
-        }
-        window.addEventListener('load', waitForSDK);
+        });
 
+        ZOHO.embeddedApp.init().then(function() {
+            log('embeddedApp.init() OK', 'ok');
+        }).catch(function(e) {
+            log('init() error: ' + JSON.stringify(e), 'fail');
+        });
+
+        // =============================================
+        // PASO 2: Obtener Email en CRM
+        // =============================================
         function obtenerEmail(module, recordId) {
             log('Obteniendo registro ' + recordId + ' de ' + module, 'wait');
             ZOHO.CRM.API.getRecord({
@@ -104,31 +92,38 @@
             });
         }
 
+        // =============================================
+        // PASO 3: Proxy Request a WordPress
+        // =============================================
         function solicitarCursos(email) {
             log('Llamando API WordPress para: ' + email, 'wait');
             var url = 'https://campus.thebigschool.com/wp-json/zoho/v1/progreso/';
             var key = 'TBS_ZOHO_8f2a9c3d5e1b7f4A2d8B0';
 
-            ZOHO.CRM.HTTP.post({
-                url: url,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: email, key: key })
-            }).then(function(res) {
-                log('Respuesta WP recibida', 'ok');
-                try {
-                    var data = res;
-                    if (typeof data === 'string') data = JSON.parse(data);
-                    if (data && typeof data.body !== 'undefined') {
-                        data = typeof data.body === 'string' ? JSON.parse(data.body) : data.body;
+            try {
+                ZOHO.CRM.HTTP.post({
+                    url: url,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: email, key: key })
+                }).then(function(res) {
+                    log('Respuesta WP recibida', 'ok');
+                    try {
+                        var data = res;
+                        if (typeof data === 'string') data = JSON.parse(data);
+                        if (data && typeof data.body !== 'undefined') {
+                            data = typeof data.body === 'string' ? JSON.parse(data.body) : data.body;
+                        }
+                        renderCourses(data, email);
+                    } catch(e) {
+                        log('Error parseando respuesta: ' + e.message, 'fail');
+                        log('Raw: ' + JSON.stringify(res).substring(0,300), 'fail');
                     }
-                    renderCourses(data, email);
-                } catch(e) {
-                    log('Error parseando respuesta: ' + e.message, 'fail');
-                    log('Raw: ' + JSON.stringify(res).substring(0,300), 'fail');
-                }
-            }).catch(function(err) {
-                log('Error HTTP.post: ' + JSON.stringify(err), 'fail');
-            });
+                }).catch(function(err) {
+                    log('Error HTTP.post: ' + JSON.stringify(err), 'fail');
+                });
+            } catch(e) {
+                log('Excepcion en proxy: ' + e.message, 'fail');
+            }
         }
 
         function renderCourses(data, email) {
