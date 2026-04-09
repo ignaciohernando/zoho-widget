@@ -42,9 +42,18 @@
         }
 
         // =============================================
+        // AUTO-DIAGNÓSTICO INICIAL (Detectar parámetros URL)
+        // =============================================
+        var params = new URLSearchParams(window.location.search);
+        var qId = params.get('id') || params.get('EntityId') || params.get('record_id');
+        var qMod = params.get('module') || params.get('Entity') || params.get('EntityModule');
+        
+        log('URL Params -> ID: ' + (qId ? qId : 'Ninguno') + ' | Mod: ' + (qMod ? qMod : 'Ninguno'), (qId ? 'ok' : 'wait'));
+
+        // =============================================
         // PASO 1: Inicialización Síncrona
         // =============================================
-        log('Registrando PageLoad...', 'wait');
+        log('Registrando PageLoad con SDK...', 'wait');
         
         ZOHO.embeddedApp.on("PageLoad", function(data) {
             log('PageLoad recibido: ' + JSON.stringify(data), 'ok');
@@ -59,14 +68,27 @@
 
         ZOHO.embeddedApp.init().then(function() {
             log('embeddedApp.init() OK', 'ok');
+            if (qId && !window.emailRequested) {
+                log('Init OK pero PageLoad no disparó. Usando params de URL...', 'ok');
+                obtenerEmail(qMod || 'Contacts', qId);
+            }
         }).catch(function(e) {
-            log('init() error: ' + JSON.stringify(e), 'fail');
+            log('init() error desc: ' + JSON.stringify(e), 'fail');
         });
+
+        // setTimeout de seguridad si el init() se queda colgado para siempre
+        setTimeout(function() {
+            if (qId && !window.emailRequested) {
+                log('TIMEOUT: Init() se quedó colgado tras 4s. Fallback a URL params...', 'fail');
+                obtenerEmail(qMod || 'Contacts', qId);
+            }
+        }, 4000);
 
         // =============================================
         // PASO 2: Obtener Email en CRM
         // =============================================
         function obtenerEmail(module, recordId) {
+            window.emailRequested = true;
             log('Obteniendo registro ' + recordId + ' de ' + module, 'wait');
             ZOHO.CRM.API.getRecord({
                 Entity: module,
